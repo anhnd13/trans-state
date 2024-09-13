@@ -1,19 +1,15 @@
 let transactions = [];
-let currentPage = 1;
 let itemsPerPage = 10;
 let lastSearch = '';
 let isDataLoaded = false;
 
 // Function to load and cache data
-async function loadTransactions(page = 1) {
+async function loadTransactions() {
+    if (isDataLoaded) return; // Avoid loading data multiple times
     try {
         const response = await fetch('bank-trans.bank-var.json');
         if (!response.ok) throw new Error('Network response was not ok');
-        const allTransactions = await response.json();
-        // Tính toán chỉ số bắt đầu và kết thúc dựa trên trang hiện tại
-        const startIndex = (page - 1) * itemsPerPage;
-        const endIndex = startIndex + itemsPerPage;
-        transactions = allTransactions.slice(startIndex, endIndex);
+        transactions = await response.json();
         isDataLoaded = true;
         searchTransactions(); // Perform search after loading data
     } catch (error) {
@@ -27,25 +23,22 @@ function searchTransactions() {
     if (searchInput === lastSearch) return;
 
     lastSearch = searchInput;
-    const searchTerms = searchInput.split(' ').filter(term => term.length > 1);
+    const searchTerms = new Set(searchInput.split(' ').filter(term => term.length > 1));
 
     const matchedTransactions = transactions
-        .map(transaction => {
-            let matchScore = 0;
-            const fieldsToCheck = [transaction.date.toLowerCase(), transaction.notes.toLowerCase(), transaction.transfer_money.toString()];
-            fieldsToCheck.forEach(field => {
-                searchTerms.forEach(term => {
-                    if (field.includes(term)) {
-                        matchScore += term === transaction.date.toLowerCase() ? 3 : term === transaction.notes.toLowerCase() ? 2 : 1;
-                    }
-                });
-            });
-            return matchScore > 0 ? { transaction, matchScore } : null;
+        .map((transaction, index) => {
+            const matchScore = Array.from(searchTerms).reduce((score, term) => {
+                if (transaction.date.toLowerCase().includes(term)) score += 3;
+                if (transaction.notes.toLowerCase().includes(term)) score += 2;
+                if (transaction.transfer_money.toString().includes(term)) score += 1;
+                return score;
+            }, 0);
+            return { transaction, matchScore };
         })
-        .filter(Boolean)
+        .filter(item => item.matchScore > 0)
         .sort((a, b) => b.matchScore - a.matchScore);
 
-    displayResults(matchedTransactions, currentPage, itemsPerPage, searchTerms);
+    displayResults(matchedTransactions, 1, itemsPerPage, searchTerms);
 }
 
 // Function to highlight search terms in text
@@ -92,10 +85,7 @@ function displayResults(matchedTransactions, page = 1, itemsPerPage = 10, search
             const pageButton = document.createElement('button');
             pageButton.textContent = i;
             pageButton.className = `pagination-button ${page === i ? 'active' : ''}`;
-            pageButton.addEventListener('click', () => {
-                currentPage = i;
-                searchTransactions();
-            });
+            pageButton.addEventListener('click', () => displayResults(matchedTransactions, i, itemsPerPage, searchTerms));
             paginationDiv.appendChild(pageButton);
         }
 
@@ -117,18 +107,15 @@ function displayResults(matchedTransactions, page = 1, itemsPerPage = 10, search
 }
 
 // Event listeners
-document.getElementById('searchButton').addEventListener('click', () => {
-    currentPage = 1; // Reset to first page on new search
-    loadTransactions(currentPage);
-});
+document.getElementById('searchButton').addEventListener('click', searchTransactions);
 document.getElementById('pageSize').addEventListener('change', function () {
     itemsPerPage = parseInt(this.value);
-    loadTransactions(currentPage);
+    searchTransactions();
 });
-document.getElementById('searchInput').addEventListener('input', debounce(() => loadTransactions(currentPage), 300));
+document.getElementById('searchInput').addEventListener('input', debounce(searchTransactions, 300));
 
 // Load data when the DOM is ready
-window.addEventListener('DOMContentLoaded', () => loadTransactions(currentPage));
+window.addEventListener('DOMContentLoaded', loadTransactions);
 
 // Debounce function to limit how often the search is executed
 function debounce(func, delay) {
